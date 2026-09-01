@@ -31,30 +31,19 @@ jobs:
             git checkout -B "$branch" "origin/$branch"
           }
 
-          # #1182: mixed Ctrl+Alt chords are already covered by the follow-up commit.
-          checkout_branch recreate/1108-ctrl-arrow-word-navigation
-          bun test cli/src/utils/__tests__/word-navigation.test.ts
-
-          # #1183: fresh-shell wording is already applied; verify the exact clarification.
-          checkout_branch recreate/1104-account-switching
-          grep -F "open a fresh shell/session" README.md
-
-          # #1184: verify the behavior is limited to the animation enablement gate.
-          checkout_branch recreate/1102-freebuff-chat-logo-sheen
-          bun test cli/src/utils/__tests__/chat-header-animation.test.ts
-          git diff HEAD^ HEAD -- cli/src/components/chat-header.tsx
-
-          # #1185: avoid recomputing the build attribution in the default prompt path.
+          # #1185: install deps, remove redundant default attribution lookup, test, push.
           checkout_branch recreate/1101-freebuff-commit-attribution
+          bun install --frozen-lockfile
           python3 - <<'PY'
           from pathlib import Path
           p = Path('common/src/tools/params/tool/run-terminal-command.ts')
           s = p.read_text()
           old = """export const getGitCommitGuidePrompt = (\n  isFreebuff = isFreebuffBuild,\n): string => {\n  const { productName, productDomain } = getCommitAttribution(isFreebuff)\n"""
           new = """export const getGitCommitGuidePrompt = (\n  isFreebuff?: boolean,\n): string => {\n  const { productName, productDomain } =\n    isFreebuff === undefined\n      ? buildCommitAttribution\n      : getCommitAttribution(isFreebuff)\n"""
-          if old not in s:
+          if old in s:
+              p.write_text(s.replace(old, new, 1))
+          elif new not in s:
               raise SystemExit('expected #1185 prompt-builder block not found')
-          p.write_text(s.replace(old, new, 1))
           PY
           bun test common/src/tools/params/tool/__tests__/run-terminal-command-branding.test.ts
           git diff --check
@@ -64,23 +53,39 @@ jobs:
             git push origin HEAD:recreate/1101-freebuff-commit-attribution
           fi
 
-          # #1186: confirm the exported constant and regression path; keep silent best-effort logging
-          # intentionally so startup failures cannot corrupt the interactive terminal UI.
+          # #1186: verify export; document why best-effort failure remains silent.
           checkout_branch recreate/1099-cli-logger-startup-resilience
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('cli/src/utils/logger.ts')
+          s = p.read_text()
+          old = """  } catch {\n    // File logging is best-effort and must never prevent the CLI from\n    // starting when the config or chat directory cannot be written.\n  }\n"""
+          new = """  } catch {\n    // File logging is best-effort and must never prevent the CLI from\n    // starting when the config or chat directory cannot be written. Keep this\n    // silent: writing to stderr during startup can corrupt the interactive UI.\n  }\n"""
+          if old in s:
+              p.write_text(s.replace(old, new, 1))
+          elif new not in s:
+              raise SystemExit('expected #1186 catch block not found')
+          PY
           grep -n "export const CHAT_LOG_FILENAME" cli/src/utils/logger.ts
           bun test cli/src/utils/__tests__/logger.test.ts
+          git diff --check
+          git add cli/src/utils/logger.ts
+          if ! git diff --cached --quiet; then
+            git commit -m "docs(cli): explain silent logger fallback"
+            git push origin HEAD:recreate/1099-cli-logger-startup-resilience
+          fi
 
-          # #1187: unrelated comments were restored by the follow-up commit.
+          # #1187: verify restored context and weekend-boundary tests.
           checkout_branch recreate/1096-deepseek-beijing-weekend-boundary
           grep -F "The whole bug in one assertion" common/src/__tests__/freebuff-peak-hours.test.ts
           grep -F 'timeZone: undefined' common/src/__tests__/freebuff-peak-hours.test.ts
           bun test common/src/__tests__/freebuff-peak-hours.test.ts
 
-          # #1188: explicitly verify the intentional ENOENT-before-containment behavior.
+          # #1188: verify intentional ENOENT-before-containment behavior.
           checkout_branch recreate/1098-sdk-list-directory-path-boundary
           bun test sdk/src/__tests__/list-directory.test.ts
 
-          # #1189: exercise the focus handoff and full-command history behavior.
+          # #1189: assert focus handoff and full /btw history entry, then push.
           checkout_branch recreate/1103-btw-command
           python3 - <<'PY'
           from pathlib import Path
@@ -88,9 +93,10 @@ jobs:
           s = p.read_text()
           old = """      const addToQueue = mock(() => {})\n      const sendMessage = mock(async () => {})\n      const setInputFocused = mock(() => {})\n      const params = createMockParams({\n        inputValue: '/btw remember the edge case',\n        isStreaming: true,\n        addToQueue,\n        sendMessage,\n        setInputFocused,\n      })\n\n      btwCmd!.handler(params, 'remember the edge case')\n\n      expect(addToQueue).toHaveBeenCalledWith(\n        expect.stringContaining('remember the edge case'),\n        [attachment],\n      )\n      expect(sendMessage).not.toHaveBeenCalled()\n      expect(setInputFocused).toHaveBeenCalledWith(true)\n      expect(useChatStore.getState().pendingAttachments).toEqual([])\n"""
           new = """      const addToQueue = mock(() => {})\n      const sendMessage = mock(async () => {})\n      const setInputFocused = mock(() => {})\n      const saveToHistory = mock(() => {})\n      const focus = mock(() => {})\n      const params = createMockParams({\n        inputRef: { current: { focus } } as RouterParams['inputRef'],\n        inputValue: '/btw remember the edge case',\n        isStreaming: true,\n        addToQueue,\n        saveToHistory,\n        sendMessage,\n        setInputFocused,\n      })\n\n      btwCmd!.handler(params, 'remember the edge case')\n\n      expect(addToQueue).toHaveBeenCalledWith(\n        expect.stringContaining('remember the edge case'),\n        [attachment],\n      )\n      expect(sendMessage).not.toHaveBeenCalled()\n      expect(saveToHistory).toHaveBeenCalledWith('/btw remember the edge case')\n      expect(setInputFocused).toHaveBeenCalledWith(true)\n      expect(focus).toHaveBeenCalledTimes(1)\n      expect(useChatStore.getState().pendingAttachments).toEqual([])\n"""
-          if old not in s:
+          if old in s:
+              p.write_text(s.replace(old, new, 1))
+          elif new not in s:
               raise SystemExit('expected #1189 busy-command test block not found')
-          p.write_text(s.replace(old, new, 1))
           PY
           bun test cli/src/commands/__tests__/command-args.test.ts cli/src/commands/__tests__/btw-attachments.test.ts cli/src/commands/__tests__/prompt-builders.test.ts
           git diff --check
@@ -100,15 +106,20 @@ jobs:
             git push origin HEAD:recreate/1103-btw-command
           fi
 
-          # #1190: verify direct imports, wrapper ownership, typecheck, and lockfile scope.
+          # #1190: refresh deps for this lockfile and verify all three maintainer concerns.
           checkout_branch recreate/1109-cli-typecheck-dependencies
+          bun install --frozen-lockfile
+          echo '=== TAR_DIRECT_USAGE ==='
           grep -R -n -E "from ['\"]tar['\"]|require\(['\"]tar['\"]\)" cli --exclude-dir=node_modules || true
+          echo '=== REACT_DOM_SERVER_USAGE ==='
           grep -R -n "react-dom/server" cli --exclude-dir=node_modules || true
+          echo '=== WRAPPER_TAR_DEPS ==='
           for f in cli/release/package.json cli/release-staging/package.json freebuff/cli/release/package.json; do
-            if [ -f "$f" ]; then
-              echo "--- $f"; grep -n '"tar"' "$f" || true
-            fi
+            if [ -f "$f" ]; then echo "--- $f"; grep -n '"tar"' "$f" || true; fi
           done
+          echo '=== CLI_TYPECHECK ==='
           bun run --cwd cli typecheck
+          echo '=== PR_DIFF_SCOPE ==='
+          git diff HEAD^ HEAD --stat -- cli/package.json bun.lock
           git diff HEAD^ HEAD -- cli/package.json bun.lock
           git diff --check
