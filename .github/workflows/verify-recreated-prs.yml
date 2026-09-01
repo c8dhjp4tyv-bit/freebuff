@@ -1,0 +1,49 @@
+name: Verify recreated PR merges
+
+on:
+  push:
+    branches:
+      - tmp-noop
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify all recreated PR branches against one upstream snapshot
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git remote add upstream https://github.com/CodebuffAI/freebuff.git || true
+          git fetch upstream main
+          upstream_sha="$(git rev-parse upstream/main)"
+          echo "UPSTREAM_SHA=$upstream_sha"
+          branches=(
+            recreate/1108-ctrl-arrow-word-navigation
+            recreate/1104-account-switching
+            recreate/1102-freebuff-chat-logo-sheen
+            recreate/1101-freebuff-commit-attribution
+            recreate/1099-cli-logger-startup-resilience
+            recreate/1096-deepseek-beijing-weekend-boundary
+            recreate/1098-sdk-list-directory-path-boundary
+            recreate/1103-btw-command
+            recreate/1109-cli-typecheck-dependencies
+          )
+          failed=0
+          for branch in "${branches[@]}"; do
+            git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
+            if git merge-tree --write-tree upstream/main "refs/remotes/origin/$branch" >/tmp/merge-tree.out 2>/tmp/merge-tree.err; then
+              echo "MERGE_OK $branch"
+            else
+              echo "MERGE_CONFLICT $branch"
+              cat /tmp/merge-tree.out || true
+              cat /tmp/merge-tree.err || true
+              failed=1
+            fi
+          done
+          exit "$failed"
